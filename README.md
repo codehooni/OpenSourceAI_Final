@@ -11,7 +11,6 @@ https://www.aihub.or.kr/aihubdata/data/view.do?currMenu=115&topMenu=100&dataSetS
 ### Tool
 
 - Google collab
-- wandb
 
 ### 요구사항
 
@@ -27,322 +26,144 @@ https://www.aihub.or.kr/aihubdata/data/view.do?currMenu=115&topMenu=100&dataSetS
 
 ---
 
-2. **wandb 홈페이지 회원가입**
-
----
-
-3. **Google collab에 .ipynb 파일 업로드**
+2. **Google collab에 .ipynb 파일 업로드**
 
 ---
 
 ### 실행 방법
 
-1. Import wandb
-<pre> <code>
-!pip install wandb
-import wandb
-!wandb login
-</code></pre>
-
-2. Import Libraries
+1. Import Libraries
 <pre> <code>
 import torch
-from torch import nn
-import torch.nn.functional as F
+import torch.nn as nn
 import torch.optim as optim
-
-import os
-import random
-from PIL import Image, UnidentifiedImageError,ImageFile
-
-import torch
-import torchvision
-from torch.utils.data import Dataset, DataLoader
-import json
-
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from torchvision.datasets import ImageFolder
+from torchvision.models import vgg16
+from tqdm import tqdm  # Import tqdm for progress bar
 
 </code></pre>
 
-3. Data Pretreatment
+2. Data Pretreatment
 <pre> <code>
 
-# 압축 풀기 코드
+# 데이터 생성
 
 '''
-import zipfile
-zipfile.ZipFile('drive/My Drive/openAI/data/data.zip').extractall('drive/My Drive/openAI/data')
-'''
+from PIL import Image
+import os
 
-</code></pre>
+# Set the input and output folders
+input_folder = "/content/gdrive/MyDrive/openAI/data/유증상_검증/유증상_라벨"
+output_folder = "유증상_검증"
 
-<pre> <code>
-# 원본 이미지 검증
-'''
-def validate_image(filepath):
-    try:
-        img = Image.open(filepath).convert('RGB')
-        img.load()
-    except UnidentifiedImageError:
-        print(f'Corrupted Image is found at: {filepath}')
-        return False
-    except (IOError, OSError):
-        print(f'Truncated Image is found at: {filepath}')
-        return False
-    else:
-        return True
-'''
-</code></pre>
-<pre> <code>
-# 이미지 검증
-'''
-root = 'drive/My Drive/openAI/data/유증상_라벨_검증'
+# Desired resolution
+new_resolution = (480, 360)
 
-dirs = os.listdir(root)
+# Iterate through subfolders and resize images
+for root, dirs, files in os.walk(input_folder):
+    for file in files:
+        # Check if the file is an image (you can add more image extensions if needed)
+        if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+            # Create input and output paths
+            input_path = os.path.join(root, file)
+            output_path = os.path.join(output_folder, os.path.relpath(input_path, input_folder))
 
-for dir* in dirs:
-folder_path = os.path.join(root, dir*)
-files = os.listdir(folder_path)
+            # Create output folder if it doesn't exist
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    for file_name in files:
-        file_path = os.path.join(folder_path, file_name)
+            # Open image, resize, and save to the output folder
+            with Image.open(input_path) as img:
+                img = img.resize(new_resolution, Image.ANTIALIAS)
+                img.save(output_path)
 
-        # 파일 확장자 확인
-        _, file_extension = os.path.splitext(file_name)
-
-        if file_extension.lower() == '.jpg':
-            valid = validate_image(file_path)
-            if not valid:
-                # 오류가 있는 이미지 파일 삭제
-                os.remove(file_path)
-        elif file_extension.lower() == '.json':
-            # JSON 파일은 삭제하지 않음
-            pass
+print("Resizing complete.")
 
 '''
 
 </code></pre>
-
 4. Data Load
 
 <pre> <code>
 
-# json 파일에서 뽑아 사용하는 경우
-import torch
-import torchvision
-from torch.utils.data import Dataset, DataLoader
-import json
-class MyDataLoader(Dataset):
-    def __init__(self, root_folder, batch_size, transform):
-        self.root_folder = root_folder
-        self.transform = transform
-        self.batch_size = batch_size
-        self.data = self.load_data()
-
-    def load_data(self):
-        data = []
-
-        for root, dirs, files in os.walk(self.root_folder):
-            for filename in files:
-                if filename.endswith('.jpg'):
-                    img_path = os.path.join(root, filename)
-
-                    json_filename = os.path.splitext(filename)[0] + '.json'
-                    json_file_path = os.path.join(root, json_filename)
-
-                    if not os.path.exists(json_file_path):
-                        continue
-
-                    with open(json_file_path, 'r') as json_file:
-                        metadata = json.load(json_file)
-
-                    label = metadata['metaData']['lesions']
-                    data.append((img_path, label))
-
-        return data
-
-    def __len__(self):
-        return len(self.data)
-
-    def label_convert(self,label):
-        label_mapping = {"A2": 0, "A3": 1, "A4": 2, "A5": 3, "A6": 4}
-        return label_mapping.get(label,-1)
-
-    def __getitem__(self, idx):
-        img_path, label = self.data[idx]
-        image = Image.open(img_path).convert('RGB')
-
-        if self.transform:
-            image = self.transform(image)
-
-        label=self.label_convert(label)
-
-        return image, label
-
-</code></pre>
-
-<pre> <code>
-
-#이미지 데이터 가져오기
-from torchvision import transforms
-'''
-#데이터 위치 지정
-train_data = torchvision.datasets.ImageFolder(
-    root = 'drive/My Drive/openAI/data/유증상_라벨_학습',
-    transform= transforms.Compose([
-      # 사이즈가 너무 커서 세션 다운되므로 줄임
-      transforms.Resize([28,28]),
-      # dataloader가 PIL 이미지를 수신하기 위해 이미지의 변형이 필요
-      transforms.ToTensor()
-    ])
-)
-test_data= torchvision.datasets.ImageFolder(
-    root = 'drive/My Drive/openAI/data/유증상_라벨_검증',
-    transform= transforms.Compose([
-      transforms.Resize([28,28]),
-      transforms.ToTensor()
-    ])
-)
-print(train_data)
-print(test_data)
-
-#데이터를 배치 사이즈에 맞게 가져오기
-#배치 사이즈=100
-
-train_loader=MyDataLoader(train_data,batch_size=100)
-test_loader=MyDataLoader(test_data,batch_size=100)
-'''
-
-train_root='drive/My Drive/openAI/data/유증상_라벨_학습'
-test_root= 'drive/My Drive/openAI/data/유증상_라벨_검증'
-
-transform=transforms.Compose([
-    transforms.Resize([28, 28]),
-    transforms.ToTensor()
-])
-
-train_loader = MyDataLoader(train_root, batch_size=100, transform=transform)
-
-test_loader = MyDataLoader(test_root, batch_size=100, transform=transform)
-
+# 이미지 데이터 불러오기
+input_folder = "/content/drive/MyDrive/openAI/data/유증상_학습"
+validation_folder = "/content/drive/MyDrive/openAI/data/유증상_검증"
 </code></pre>
 
 5. Define Model
 <pre> <code>
-class CNN(nn.Module):
-  def __init__(self):
-    super(CNN,self).__init__()
-    #convolution
-    self.conv1=nn.Conv2d(in_channels=3,out_channels=32,kernel_size=(3,3),padding=1)
-    self.conv2=nn.Conv2d(in_channels=32,out_channels=64,kernel_size=(3,3),padding=1)
-    #pooling
-    self.pool=nn.MaxPool2d(kernel_size=(2,2))
+class CustomVGG16(nn.Module):
+    def __init__(self, num_classes):
+        super(CustomVGG16, self).__init__()
+        vgg_model = vgg16(pretrained=True)
+        self.features = vgg_model.features
+        self.classifier = nn.Sequential(
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, num_classes)
+        )
 
-    self.fc1=nn.Linear(64*7*7,128)
-    self.fc2=nn.Linear(128,10)
-
-def forward(self,x): # 각자 합성곱, 활성함수, pooling 적용
-x=self.pool(F.relu(self.conv1(x)))
-x=self.pool(F.relu(self.conv2(x)))
-x=x.view(-1,64*7*7)
-x=F.relu(self.fc1(x))
-x=self.fc2(x)
-
-    return F.softmax(x,dim=1)
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = self.classifier(x)
+        return x
 
 </code></pre>
 
 <pre> <code>
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # 앞서 정의한 모델을 장치로 올림, 모델 정의
-model = CNN().to(device)
+model = model.to(device)
 </code></pre>
 <pre> <code>
-# 모델 학습을 위한 손실 함수와 최적화 함수
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.01)
-</code></pre>
 
 6. Model Train
 <pre><code>
 #학습
-for epoch in range(5):
-  model.train()
-  running_loss = 0.0
-  correct = 0
-  total = 0
-  for i, data in enumerate(train_loader, 0):
-      # Get the inputs; data is a list of [inputs, labels]
-      #label 데이터 추출 후 담기
-      inputs, labels= data
+num_epochs = 10
+for epoch in range(num_epochs):
+    model.train()
+    train_loss = 0.0
+    correct = 0
+    total = 0
+    with tqdm(total=len(train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}", unit="batch") as pbar:
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
 
-      if isinstance(labels, str):
-        labels = torch.tensor([int(labels)]).to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
-      inputs, labels= inputs.to(device), labels.to(device)
+            train_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
 
-      # Zero the parameter gradients
-      optimizer.zero_grad()
+            pbar.set_postfix({'loss': train_loss / total, 'accuracy': correct / total})
+            pbar.update()
 
-      # Forward pass
-      outputs = model(inputs)
+    # Validation
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in validation_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
 
-      # Compute the loss
-      loss = criterion(outputs, labels)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
 
-      # Backward pass and optimize
-      loss.backward()
-      optimizer.step()
-
-      # Accuracy
-      _, predicted = torch.max(outputs.data, 1)
-      total += labels.size(0)
-      correct += (predicted == labels).sum().item()
-
-      # log loss
-      wandb.log({'train/loss':loss.item(), 'train/acc':correct/total})
-
-      # Print statistics
-      running_loss += loss.item()
-      if i % 100 == 99:    # Print every 100 mini-batches
-          print(f'Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 100}')
-          running_loss = 0.0
-
-model.eval()
-with torch.no_grad():
-running_loss = 0.0
-correct = 0
-total = 0
-for i, data in enumerate(test_loader, 0):
-#label 데이터 추출 후 담기
-inputs, labels= data
-
-      if isinstance(labels, str):
-        labels = torch.tensor([int(labels)]).to(device)
-
-      inputs, labels= inputs.to(device), labels.to(device)
-
-      # Forward pass
-      outputs = model(inputs)
-
-      # Compute the loss
-      loss = criterion(outputs, labels)
-
-      # Accuracy
-      _, predicted = torch.max(outputs.data, 1)
-      total += labels.size(0)
-      correct += (predicted == labels).sum().item()
-      running_loss += loss.item()
-
-      # log loss
-      wandb.log({'test/loss':loss.item(), 'test/acc':correct/total})
-
-      # Print statistics
-      running_loss += loss.item()
-      if i % 100 == 99:    # Print every 100 mini-batches
-          print(f'Test Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 100}')
-          running_loss = 0.0
-
-print('Finished Training')
-wandb.finish()
+    accuracy = correct / total
+    print(f"Epoch {epoch + 1}/{num_epochs}, Validation Accuracy: {accuracy * 100:.2f}%")
 </code></pre>
